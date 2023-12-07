@@ -1,3 +1,6 @@
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
@@ -17,14 +20,12 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * @param <V>   the type of values used by this cache
  */
 public class LFUCache<K, V> implements Cache<K, V> {
-    private int maxSize;
-    private long expiryTimeInMillis;
+    private final int maxSize;
+    private final long expiryTimeInMillis;
     //mapping of key to associated value
-    private Map<K, LFUCacheEntry<K,V>> keyValueMap;
-    //mapping of key to value use (lookup) frequency
-    private Map<K, Integer> keyFrequencyMap;
+    private final Map<K, LFUCacheEntry<K,V>> keyValueMap;
     //map of use frequency to list of value entries
-    private ConcurrentSkipListMap<Integer, DoublyLinkedLFUCacheEntryList<K, V>> frequencyEntryMap = new ConcurrentSkipListMap<>();
+    private final ConcurrentSkipListMap<Integer, DoublyLinkedLFUCacheEntryList<K, V>> frequencyEntryMap = new ConcurrentSkipListMap<>();
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
 
     /**
@@ -42,7 +43,8 @@ public class LFUCache<K, V> implements Cache<K, V> {
         expiryTimeInMillis = expiryTimeInSeconds * 1000;
         maxSize = maxCacheSize;
         keyValueMap = new ConcurrentHashMap<>(maxCacheSize);
-        keyFrequencyMap = new ConcurrentHashMap<>(maxCacheSize);
+
+        createAndStartExpiryCleanupThread();
     }
 
     /**
@@ -59,18 +61,12 @@ public class LFUCache<K, V> implements Cache<K, V> {
             LFUCacheEntry<K,V> entry = keyValueMap.get(key);
             if (entry == null) return null;
 
-            //update frequency of entry associated with key
-            LFUCacheEntry<K,V> updatedEntry = new LFUCacheEntry<>(key, entry.value());
-            int prevFrequency = keyFrequencyMap.get(key);
-
+            int prevFrequency = entry.getHitFrequency();
             removeEntryFromFrequencyList(prevFrequency, entry);
-            keyValueMap.remove(key);
-            keyFrequencyMap.remove(key);
-            keyValueMap.put(key, updatedEntry);
-            keyFrequencyMap.put(key, prevFrequency + 1);
-            frequencyEntryMap.computeIfAbsent(prevFrequency + 1, entryList -> new DoublyLinkedLFUCacheEntryList<>()).add(updatedEntry);
+            keyValueMap.computeIfPresent(key, (k, v) -> v.setHitFrequency(prevFrequency + 1));
+            frequencyEntryMap.computeIfAbsent(prevFrequency + 1, entryList -> new DoublyLinkedLFUCacheEntryList<>()).add(entry);
 
-            return updatedEntry.value();
+            return entry.value();
         } finally {
             lock.readLock().unlock();
         }
@@ -98,7 +94,7 @@ public class LFUCache<K, V> implements Cache<K, V> {
         lock.writeLock().lock();
         try {
             if (!keyValueMap.containsKey(key)) { //adding new entry
-                LFUCacheEntry<K, V> entryToAdd = new LFUCacheEntry<>(key, value);
+                LFUCacheEntry<K, V> entryToAdd = new LFUCacheEntry<>(key, value, 1);
 
                 if (keyValueMap.size() == maxSize) { //need to remove LFU entry
                     int leastFrequency = frequencyEntryMap.firstKey();
@@ -106,24 +102,18 @@ public class LFUCache<K, V> implements Cache<K, V> {
 
                     removeEntryFromFrequencyList(leastFrequency, entryToRemove);
                     keyValueMap.remove(entryToRemove.key());
-                    keyFrequencyMap.remove(entryToRemove.key());
                 }
 
                 frequencyEntryMap.computeIfAbsent(1, entryList -> new DoublyLinkedLFUCacheEntryList<>()).add(entryToAdd);
                 keyValueMap.put(key, entryToAdd);
-                keyFrequencyMap.put(key, 1);
             }
             else { //updating existing entry
                 LFUCacheEntry<K,V> entryToUpdate = keyValueMap.get(key);
-                LFUCacheEntry<K,V> updatedEntry = new LFUCacheEntry<>(key, value);
-                int prevFrequency = keyFrequencyMap.get(key);
+                int prevFrequency = entryToUpdate.getHitFrequency();
 
                 removeEntryFromFrequencyList(prevFrequency, entryToUpdate);
-                keyValueMap.remove(key);
-                keyFrequencyMap.remove(key);
-                keyValueMap.put(key, updatedEntry);
-                keyFrequencyMap.put(key, prevFrequency + 1);
-                frequencyEntryMap.computeIfAbsent(prevFrequency + 1, entryList -> new DoublyLinkedLFUCacheEntryList<>()).add(updatedEntry);
+                keyValueMap.computeIfPresent(key, (k, v) -> v.setValue(value).setHitFrequency(prevFrequency + 1));
+                frequencyEntryMap.computeIfAbsent(prevFrequency + 1, entryList -> new DoublyLinkedLFUCacheEntryList<>()).add(entryToUpdate);
             }
         } finally {
             lock.writeLock().unlock();
@@ -135,7 +125,13 @@ public class LFUCache<K, V> implements Cache<K, V> {
      */
     @Override
     public void clear() {
-        keyValueMap.clear();
+        lock.writeLock().lock();
+        try {
+            keyValueMap.clear();
+            frequencyEntryMap.clear();
+        } finally {
+            lock.writeLock().unlock();
+        }
     }
 
     /**
@@ -152,17 +148,50 @@ public class LFUCache<K, V> implements Cache<K, V> {
             frequencyEntryMap.remove(frequency);
         }
     }
+
+    private void createAndStartExpiryCleanupThread() {
+        Thread expiryCleanupThread = new Thread(() -> {
+            while (!Thread.currentThread().isInterrupted()) {
+                try {
+                    Thread.sleep(expiryTimeInMillis / 2);
+                    long currentTime = System.currentTimeMillis();
+                    Map<Integer, List<LFUCacheEntry<K,V>>> frequencyExpiredEntriesMap = new HashMap<>();
+                    for (LFUCacheEntry<K,V> entry : keyValueMap.values()) {
+                        if (entry.getTimestamp() + expiryTimeInMillis <= currentTime) {
+                            frequencyExpiredEntriesMap.computeIfAbsent(entry.getHitFrequency(), entryList -> new ArrayList<>()).add(entry);
+                        }
+                    }
+                    frequencyExpiredEntriesMap.forEach((frequency, entries) -> {
+                        for (LFUCacheEntry<K,V> entry : entries) {
+                            removeEntryFromFrequencyList(frequency, entry);
+                            keyValueMap.remove(entry.key());
+                        }
+                    });
+
+                    keyValueMap.entrySet().removeIf(entry -> entry.getValue().getTimestamp() >= currentTime + expiryTimeInMillis);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        });
+        expiryCleanupThread.setDaemon(true);
+        expiryCleanupThread.start();
+    }
 }
 
 class LFUCacheEntry<K, V> {
-    private K key;
+    private final K key;
     private V value;
+    private int hitFrequency;
+    private final long timestamp;
     LFUCacheEntry<K,V> next;
     LFUCacheEntry<K,V> prev;
 
-    public LFUCacheEntry(K key, V value) {
+    public LFUCacheEntry(K key, V value, int hitFrequency) {
         this.key = key;
         this.value = value;
+        this.hitFrequency = hitFrequency;
+        timestamp = System.currentTimeMillis();
     }
 
     public K key() {
@@ -171,6 +200,24 @@ class LFUCacheEntry<K, V> {
 
     public V value() {
         return value;
+    }
+
+    public LFUCacheEntry<K,V> setValue(V value) {
+        this.value = value;
+        return this;
+    }
+
+    public int getHitFrequency() {
+        return hitFrequency;
+    }
+
+    public LFUCacheEntry<K,V> setHitFrequency(int hitFrequency) {
+        this.hitFrequency = hitFrequency;
+        return this;
+    }
+
+    public long getTimestamp() {
+        return timestamp;
     }
 }
 
@@ -181,10 +228,6 @@ class DoublyLinkedLFUCacheEntryList<K, V> {
 
     public LFUCacheEntry<K, V> head() {
         return head;
-    }
-
-    public LFUCacheEntry<K, V> tail() {
-        return tail;
     }
 
     public int size() {

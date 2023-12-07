@@ -1,10 +1,13 @@
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 
 public class Solution {
     public static void main(String[] args) {
         getAbsentKey();
         basicPutGetTest();
         LFUTest();
+        expireAllTest();
+        expirePartialTest();
     }
 
     private static void getAbsentKey() {
@@ -126,7 +129,105 @@ public class Solution {
         System.out.println("Test SUCCEEDED");
     }
 
-    private static void assertEquals(Object expected, Object actual) {
+    private static void expireAllTest() {
+        System.out.println("Running expireAllTest() test...");
+
+        LFUCache<String, String> cache = new LFUCache<>(1, 5);
+        LFUCache<String, Integer> cache2 = new LFUCache<>(1, 5);
+
+        try {
+            //Test waiting for all entries to expire - String values
+            cache.put("a", "A");
+            cache.put("b", "B");
+            cache.put("c", "C");
+            cache.put("d", "D");
+            cache.put("e", "E");
+
+            TimeUnit.SECONDS.sleep(2);
+            assertEquals(cache.size(), 0);
+
+            //Test waiting for all entries to expire - Integer values
+            cache2.put("a", 1);
+            cache2.put("b", 2);
+            cache2.put("c", 3);
+            cache2.put("d", 4);
+            cache2.put("e", 5);
+
+            TimeUnit.SECONDS.sleep(2);
+            assertEquals(cache2.size(), 0);
+        } catch (IllegalStateException | InterruptedException e) {
+            System.out.printf("Test FAILED: %s%n", e.getMessage());
+            return;
+        }
+
+        System.out.println("Test SUCCEEDED");
+    }
+
+    private static void expirePartialTest() {
+        System.out.println("Running expirePartialTest() test...");
+
+        LFUCache<String, String> cache = new LFUCache<>(3, 5);
+        LFUCache<String, Integer> cache2 = new LFUCache<>(3, 5);
+
+        try {
+            //Test waiting for a subset of entries to expire - String values
+            cache.put("a", "A");
+            cache.put("b", "B");
+            cache.put("c", "C");
+            cache.put("d", "D");
+            cache.put("e", "E");
+
+            TimeUnit.SECONDS.sleep(2);
+
+            cache.put("f", "F");
+            cache.put("g", "G");
+            cache.put("h", "H");
+
+            TimeUnit.SECONDS.sleep(2);
+
+            assertEquals(cache.size(), 3);
+            assertEquals(cache.get("a"), null);
+            assertEquals(cache.get("b"), null);
+            assertEquals(cache.get("c"), null);
+            assertEquals(cache.get("d"), null);
+            assertEquals(cache.get("e"), null);
+            assertEquals(cache.get("f"), "F");
+            assertEquals(cache.get("g"), "G");
+            assertEquals(cache.get("h"), "H");
+
+            //Test waiting for a subset of entries to expire - Integer values
+            cache2.put("a", 1);
+            cache2.put("b", 2);
+            cache2.put("c", 3);
+            cache2.put("d", 4);
+            cache2.put("e", 5);
+
+            TimeUnit.SECONDS.sleep(2);
+
+            cache2.put("f", 6);
+            cache2.put("g", 7);
+            cache2.put("h", 8);
+
+            TimeUnit.SECONDS.sleep(2);
+
+            assertEquals(cache2.size(), 3);
+            assertEquals(cache2.get("a"), null);
+            assertEquals(cache2.get("b"), null);
+            assertEquals(cache2.get("c"), null);
+            assertEquals(cache2.get("d"), null);
+            assertEquals(cache2.get("e"), null);
+            assertEquals(cache2.get("f"), 6);
+            assertEquals(cache2.get("g"), 7);
+            assertEquals(cache2.get("h"), 8);
+        } catch (IllegalStateException | InterruptedException e) {
+            System.out.printf("Test FAILED: line %s - %s%n", e.getStackTrace()[1].getLineNumber(), e.getMessage());
+            return;
+        }
+
+        System.out.println("Test SUCCEEDED");
+    }
+
+    private static void assertEquals(Object actual, Object expected) {
         if (!Objects.equals(expected, actual)) {
             throw new IllegalStateException(String.format("expected='%s'; actual='%s'", expected, actual));
         }
