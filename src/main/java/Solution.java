@@ -143,7 +143,7 @@ public class Solution {
             cache.put("d", "D");
             cache.put("e", "E");
 
-            TimeUnit.SECONDS.sleep(2);
+            TimeUnit.SECONDS.sleep(2); //wait for 1s longer than expiry time (2 = 1+1) to ensure cleanup thread has time to run
             assertEquals(cache.size(), 0);
 
             //Test waiting for all entries to expire - Integer values
@@ -183,7 +183,7 @@ public class Solution {
             cache.put("g", "G");
             cache.put("h", "H");
 
-            TimeUnit.SECONDS.sleep(2);
+            TimeUnit.SECONDS.sleep(2); //wait for 1s longer than expiry time (2+2 = 3+1) to ensure cleanup thread has time to run
 
             assertEquals(cache.size(), 3);
             assertEquals(cache.get("a"), null);

@@ -20,6 +20,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * @param <V>   the type of values used by this cache
  */
 public class LFUCache<K, V> implements Cache<K, V> {
+    private final static int CLEANUP_THREAD_PERIOD_MILLIS = 500;
     private final int maxSize;
     private final long expiryTimeInMillis;
     //mapping of key to associated value
@@ -31,7 +32,7 @@ public class LFUCache<K, V> implements Cache<K, V> {
     /**
      * Constructs a new {@code LFUCache} instance with the specified expiry time and max size.
      *
-     * @param expiryTimeInSeconds   the elapsed time since last access after which an entry should expire and be removed
+     * @param expiryTimeInSeconds   the elapsed time since entry was added after which the entry should expire and be removed
      *                              from the cache
      * @param maxCacheSize          the maximum number of entries to be maintained in the cache
      */
@@ -153,7 +154,7 @@ public class LFUCache<K, V> implements Cache<K, V> {
         Thread expiryCleanupThread = new Thread(() -> {
             while (!Thread.currentThread().isInterrupted()) {
                 try {
-                    Thread.sleep(expiryTimeInMillis / 2);
+                    Thread.sleep(CLEANUP_THREAD_PERIOD_MILLIS);
                     long currentTime = System.currentTimeMillis();
                     Map<Integer, List<LFUCacheEntry<K,V>>> frequencyExpiredEntriesMap = new HashMap<>();
                     for (LFUCacheEntry<K,V> entry : keyValueMap.values()) {
