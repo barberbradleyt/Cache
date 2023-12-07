@@ -11,8 +11,9 @@ public interface Cache<K, V> {
      * value for the {@code key}.
      *
      * @param key   the key whose associated value is to be returned
+     * @return      the value associated with the provided key, else null if no association present
      **/
-    public V get(K key);
+    V get(K key);
 
     /**
      * Associates the {@code value} with the {@code key} in this cache. If the {@code key} is already associated with a
@@ -21,5 +22,15 @@ public interface Cache<K, V> {
      * @param key   the key to which the provided value is to be associated
      * @param value the value to be associated with the provided key
      */
-    public void put(K key, V value);
+    void put(K key, V value);
+
+    /**
+     * Clears all entries from this cache.
+     */
+    void clear();
+
+    /**
+     * Returns the number of entries in this cache.
+     */
+    int size();
 }
