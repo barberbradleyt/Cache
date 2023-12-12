@@ -6,6 +6,7 @@ public class Solution {
         getAbsentKey();
         basicPutGetTest();
         LFUTest();
+        LFUWithUpdateTest();
         expireAllTest();
         expirePartialTest();
     }
@@ -25,7 +26,7 @@ public class Solution {
             assertEquals(cache2.size(), 0);
             assertEquals(cache2.get("a"), null);
         } catch (IllegalStateException e) {
-            System.out.printf("Test FAILED: %s%n", e.getMessage());
+            System.out.printf("Test FAILED: line %s - %s%n", e.getStackTrace()[1].getLineNumber(), e.getMessage());
             return;
         }
         System.out.println("Test SUCCEEDED");
@@ -66,7 +67,7 @@ public class Solution {
             assertEquals(cache2.get("d"), 4);
             assertEquals(cache2.get("e"), 5);
         } catch (IllegalStateException e) {
-            System.out.printf("Test FAILED: %s%n", e.getMessage());
+            System.out.printf("Test FAILED: line %s - %s%n", e.getStackTrace()[1].getLineNumber(), e.getMessage());
             return;
         }
 
@@ -91,12 +92,12 @@ public class Solution {
             cache.get("c");
             cache.get("d");
 
-            cache.put("f", "F"); //a->A is oldest LFU, should be removed
+            cache.put("f", "F"); //a->A is oldest (since last use) LFU, should be removed
             assertEquals(cache.size(), 5);
             assertEquals(cache.get("a"), null);
             assertEquals(cache.get("f"), "F");
 
-            cache.put("g", "G"); //e->E is oldest LFU, should be removed
+            cache.put("g", "G"); //e->E is oldest (since last use) LFU, should be removed
             assertEquals(cache.size(), 5);
             assertEquals(cache.get("e"), null);
             assertEquals(cache.get("g"), "G");
@@ -112,17 +113,91 @@ public class Solution {
             cache2.get("c");
             cache2.get("d");
 
-            cache2.put("f", 6); //a->A is oldest LFU, should be removed
+            cache2.put("f", 6); //a->A is oldest (since last use) LFU, should be removed
             assertEquals(cache2.size(), 5);
             assertEquals(cache2.get("a"), null);
             assertEquals(cache2.get("f"), 6);
 
-            cache2.put("g", 7); //e->E is oldest LFU, should be removed
+            cache2.put("g", 7); //e->E is oldest (since last use) LFU, should be removed
             assertEquals(cache2.size(), 5);
             assertEquals(cache2.get("e"), null);
             assertEquals(cache2.get("g"), 7);
         } catch (IllegalStateException e) {
-            System.out.printf("Test FAILED: %s%n", e.getMessage());
+            System.out.printf("Test FAILED: line %s - %s%n", e.getStackTrace()[1].getLineNumber(), e.getMessage());
+            return;
+        }
+
+        System.out.println("Test SUCCEEDED");
+    }
+
+    private static void LFUWithUpdateTest() {
+        System.out.println("Running LFUWithUpdateTest() test...");
+
+        LFUCache<String, String> cache = new LFUCache<>(10, 5);
+        LFUCache<String, Integer> cache2 = new LFUCache<>(10, 5);
+
+        try {
+            //Test adding and retrieving entries beyond max size with value updates - String value
+            cache.put("a", "A");
+            cache.put("b", "B");
+            cache.put("c", "C");
+            cache.put("d", "D");
+            cache.put("e", "E");
+
+            for (int i = 0; i < 3; i++) { // Get each entry 3 to ensure these have the highest hit frequency
+                cache.get("b");
+                cache.get("c");
+                cache.get("d");
+            }
+
+            cache.put("a", "_A_"); //Update next 2 LFU entries
+            cache.put("e", "_E_");
+            assertEquals(cache.size(), 5);
+            assertEquals(cache.get("a"), "_A_");
+            assertEquals(cache.get("e"), "_E_");
+
+            cache.put("f", "F"); //a->_A_ is oldest (since last use) LFU, should be removed
+            assertEquals(cache.size(), 5);
+            assertEquals(cache.get("a"), null);
+            assertEquals(cache.get("f"), "F");
+
+            cache.get("f"); //move f from freq:2->3, so it's not LFU
+            cache.put("g", "G"); //e->_E_ is oldest (since last use) LFU, should be removed
+            assertEquals(cache.size(), 5);
+            assertEquals(cache.get("e"), null);
+            assertEquals(cache.get("g"), "G");
+
+            //Test adding and retrieving entries beyond max size - Integer value
+            cache2.put("a", 1);
+            cache2.put("b", 2);
+            cache2.put("c", 3);
+            cache2.put("d", 4);
+            cache2.put("e", 5);
+
+            for (int i = 0; i < 3; i++) { // Get each entry 3 to ensure these have the highest hit frequency
+                cache2.get("b");
+                cache2.get("c");
+                cache2.get("d");
+            }
+
+            cache2.put("a", 10); //Update next 2 LFU entries
+            cache2.put("e", 50);
+            assertEquals(cache2.size(), 5);
+            assertEquals(cache2.get("a"), 10);
+            assertEquals(cache2.get("e"), 50);
+
+            cache2.put("f", 6); //a->10 is oldest (since last use) LFU, should be removed
+            assertEquals(cache2.size(), 5);
+            assertEquals(cache2.get("a"), null);
+            assertEquals(cache2.get("f"), 6);
+
+            cache2.get("f"); //move f from freq:2->3, so it's not LFU
+            cache2.put("g", 7); //e->50 is oldest (since last use) LFU, should be removed
+            assertEquals(cache2.size(), 5);
+            assertEquals(cache2.get("e"), null);
+            assertEquals(cache2.get("g"), 7);
+        } catch (IllegalStateException e) {
+            System.out.printf("Test FAILED: line %s - %s%n", e.getStackTrace()[1].getLineNumber(), e.getMessage());
             return;
         }
 
@@ -156,7 +231,7 @@ public class Solution {
             TimeUnit.SECONDS.sleep(2);
             assertEquals(cache2.size(), 0);
         } catch (IllegalStateException | InterruptedException e) {
-            System.out.printf("Test FAILED: %s%n", e.getMessage());
+            System.out.printf("Test FAILED: line %s - %s%n", e.getStackTrace()[1].getLineNumber(), e.getMessage());
             return;
         }
 

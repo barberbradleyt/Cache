@@ -61,6 +61,8 @@ public class LFUCache<K, V> implements Cache<K, V> {
         try {
             LFUCacheEntry<K,V> entry = keyValueMap.get(key);
             if (entry == null) return null;
+            // TODO: if using size() with expired entries filter, uncomment to filter expired entries from get() as well
+            // if (entry.getTimestamp() + expiryTimeInMillis <= System.currentTimeMillis()) return null;
 
             int prevFrequency = entry.getHitFrequency();
             removeEntryFromFrequencyList(prevFrequency, entry);
@@ -108,7 +110,7 @@ public class LFUCache<K, V> implements Cache<K, V> {
                 frequencyEntryMap.computeIfAbsent(1, entryList -> new DoublyLinkedLFUCacheEntryList<>()).add(entryToAdd);
                 keyValueMap.put(key, entryToAdd);
             }
-            else { //updating existing entry
+            else { //updating existing entry and increase hit frequency
                 LFUCacheEntry<K,V> entryToUpdate = keyValueMap.get(key);
                 int prevFrequency = entryToUpdate.getHitFrequency();
 
@@ -143,6 +145,18 @@ public class LFUCache<K, V> implements Cache<K, V> {
         return keyValueMap.size();
     }
 
+    /*
+    //TODO: Consider this size method which filters out expired entries but performs in O(n) time complexity
+    @Override
+    public int size() {
+        int size = 0;
+        for (LFUCacheEntry<K, V> entry: keyValueMap.values()) {
+            if (entry.getTimestamp() + expiryTimeInMillis > System.currentTimeMillis()) size++;
+        }
+        return size;
+    }
+    */
+
     private void removeEntryFromFrequencyList(int frequency, LFUCacheEntry<K,V> entry) {
         frequencyEntryMap.get(frequency).remove(entry);
         if (frequencyEntryMap.get(frequency).size() == 0) {
@@ -155,21 +169,26 @@ public class LFUCache<K, V> implements Cache<K, V> {
             while (!Thread.currentThread().isInterrupted()) {
                 try {
                     Thread.sleep(CLEANUP_THREAD_PERIOD_MILLIS);
-                    long currentTime = System.currentTimeMillis();
-                    Map<Integer, List<LFUCacheEntry<K,V>>> frequencyExpiredEntriesMap = new HashMap<>();
-                    for (LFUCacheEntry<K,V> entry : keyValueMap.values()) {
-                        if (entry.getTimestamp() + expiryTimeInMillis <= currentTime) {
-                            frequencyExpiredEntriesMap.computeIfAbsent(entry.getHitFrequency(), entryList -> new ArrayList<>()).add(entry);
+                    lock.writeLock().lock();
+                    try {
+                        long currentTime = System.currentTimeMillis();
+                        Map<Integer, List<LFUCacheEntry<K, V>>> frequencyExpiredEntriesMap = new HashMap<>();
+                        for (LFUCacheEntry<K, V> entry : keyValueMap.values()) {
+                            if (entry.getTimestamp() + expiryTimeInMillis <= currentTime) {
+                                frequencyExpiredEntriesMap.computeIfAbsent(entry.getHitFrequency(), entryList -> new ArrayList<>()).add(entry);
+                            }
                         }
-                    }
-                    frequencyExpiredEntriesMap.forEach((frequency, entries) -> {
-                        for (LFUCacheEntry<K,V> entry : entries) {
-                            removeEntryFromFrequencyList(frequency, entry);
-                            keyValueMap.remove(entry.key());
-                        }
-                    });
+                        frequencyExpiredEntriesMap.forEach((frequency, entries) -> {
+                            for (LFUCacheEntry<K, V> entry : entries) {
+                                removeEntryFromFrequencyList(frequency, entry);
+                                keyValueMap.remove(entry.key());
+                            }
+                        });
 
-                    keyValueMap.entrySet().removeIf(entry -> entry.getValue().getTimestamp() >= currentTime + expiryTimeInMillis);
+                        keyValueMap.entrySet().removeIf(entry -> entry.getValue().getTimestamp() >= currentTime + expiryTimeInMillis);
+                    } finally {
+                        lock.writeLock().unlock();
+                    }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }

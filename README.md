@@ -6,8 +6,7 @@ the time elapsed since the entry was _added_ to the cache.
 
 ## LFUCache Design
 Since the main purpose of a cache is to reduce data retrieval time, I prioritized the performance of the _get()_ and 
-_put()_ operations over memory usage. These operations, as well as _size()_ as it is called during _put()_, perform 
-in O(1) average time complexity.
+_put()_ operations over memory usage. These operations perform in O(1) average time complexity.
 
 Expiry eviction is performed by a separate thread, so this implementation has also been designed to be thread-safe and
 synchronized by way of concurrent classes and read/write locks.
@@ -21,14 +20,13 @@ All method naming as well as behaviour for null keys, null values and attempted 
 cache all follow the naming conventions and behaviour of the underlying [ConcurrentHashMap](https://docs.oracle.com/en/java/javase/20/docs/api/java.base/java/util/concurrent/ConcurrentHashMap.html) used to store the entries.
 
 ### Issues
-One issue with this implementation is that, while the _size()_ method is O(1), this comes at the cost of expiry accuracy
-since it does not account for the lag between entries expiring and being evicted by the expiry eviction thread. This
-can result in entries which have expired but not yet evicted being considered. An alternative would be to filter out
-entries for which the timestamp is older than the expiry time. This would result in a more accurate expiry behaviour,
-however it would come at the expense of the _size()_ method increasing in time complexity to O(n). And, since the 
-_put()_ method calls _size()_ as part of the LFU algorithm, this would also increase the _put()_ method time complexity 
-to O(n). Due to this, I decided the expiry accuracy reduction (since this is just to conserve memory usage) was worth it 
-to keep the _put()_ average time complexity to O(1).
+One issue with this implementation is that, while the _size()_ anf _get()_ methods are O(1), this comes at the cost of 
+expiry accuracy since they do not account for the lag between entries expiring and being evicted by the expiry eviction 
+thread. This can result in entries which have expired but not yet evicted being considered. An alternative would be to 
+filter out entries for which the timestamp is older than the expiry time. This would result in a more accurate expiry behaviour,
+however it would come at the expense of the _size()_ method increasing in time complexity to O(n). Due to this, I 
+decided the expiry accuracy reduction (since this is just to conserve memory usage) was worth it to keep the average 
+time complexity of all methods to O(1).
 
 ### Testing
 As requested, tests have been written within the _main_ method of the __Solution__ class. Typically, I would use a test
